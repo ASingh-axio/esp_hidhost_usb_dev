@@ -55,6 +55,8 @@ typedef enum {
     DEVICE_CONNECTED = 0x4,
     DEVICE_DISCONNECTED = 0x8,
     DEVICE_ADDRESS_MASK = 0xFF0,
+    APP_QUIT_EVENT = 0x10000,
+
 } app_event_t;
 
 /**
@@ -74,6 +76,7 @@ typedef struct {
 
 static const char *TAG = "example";
 static EventGroupHandle_t usb_flags;
+static hid_host_device_handle_t hid_device = NULL;
 static bool hid_device_connected = false;
 
 hid_host_interface_handle_t keyboard_handle = NULL;
@@ -701,10 +704,58 @@ void app_main(void)
     ESP_LOGI(TAG, "Done");
 }
 */
+
+
+void vUSBEventHandlerTask(void *pvParameters) {
+    while (gpio_get_level(APP_QUIT_PIN) != 0) {
+        EventBits_t event = xEventGroupWaitBits(
+            usb_flags, 
+            USB_EVENTS_TO_WAIT, 
+            pdTRUE, 
+            pdFALSE, 
+            pdMS_TO_TICKS(APP_QUIT_PIN_POLL_MS)
+        );
+
+        if (event & DEVICE_CONNECTED) {
+            xEventGroupClearBits(usb_flags, DEVICE_CONNECTED);
+            hid_device_connected = true;
+        }
+
+        if (event & DEVICE_ADDRESS_MASK) {
+            xEventGroupClearBits(usb_flags, DEVICE_ADDRESS_MASK);
+
+            const hid_host_device_config_t hid_host_device_config = {
+                .dev_addr = (event & DEVICE_ADDRESS_MASK) >> 4,
+                .iface_event_cb = hid_host_interface_event_callback,
+                .iface_event_arg = NULL,
+            };
+
+            ESP_ERROR_CHECK(hid_host_install_device(&hid_host_device_config, &hid_device));
+        }
+
+        if (event & DEVICE_DISCONNECTED) {
+            xEventGroupClearBits(usb_flags, DEVICE_DISCONNECTED);
+
+            hid_host_release_interface(keyboard_handle);
+            hid_host_release_interface(mouse_handle);
+
+            ESP_ERROR_CHECK(hid_host_uninstall_device(hid_device));
+
+            hid_device_connected = false;
+        }
+
+        vTaskDelay(pdMS_TO_TICKS(APP_QUIT_PIN_POLL_MS)); // Optional: Add a small delay to yield CPU time
+    }
+    xEventGroupSetBits(usb_flags, APP_QUIT_EVENT);
+    vTaskDelete(NULL); // Delete the task if the loop exits
+}
+
+
+
 void app_main(void) {
     TaskHandle_t usb_events_task_handle;
     TaskHandle_t repeated_keys_task_handle;
-    hid_host_device_handle_t hid_device;
+    //hid_host_device_handle_t hid_device;
 
     BaseType_t task_created;
 
@@ -742,14 +793,24 @@ void app_main(void) {
     };
 
     ESP_ERROR_CHECK(hid_host_install(&hid_host_config));
-
+    
+    // Create the USB event handler task
+    task_created = xTaskCreate(
+        vUSBEventHandlerTask, 
+        "USBEventHandler", 
+        4096, 
+        NULL, 
+        2, 
+        NULL
+    );
+    assert(task_created == pdPASS);
+/*
     do {
         EventBits_t event = xEventGroupWaitBits(usb_flags, USB_EVENTS_TO_WAIT, pdTRUE, pdFALSE, pdMS_TO_TICKS(APP_QUIT_PIN_POLL_MS));
 
         if (event & DEVICE_CONNECTED) {
             xEventGroupClearBits(usb_flags, DEVICE_CONNECTED);
             hid_device_connected = true;
-            printf("Device connected Da!\n");
         }
 
         if (event & DEVICE_ADDRESS_MASK) {
@@ -762,7 +823,6 @@ void app_main(void) {
             };
 
             ESP_ERROR_CHECK(hid_host_install_device(&hid_host_device_config, &hid_device));
-            printf("Device address mask Da!\n");
         }
 
         if (event & DEVICE_DISCONNECTED) {
@@ -774,11 +834,12 @@ void app_main(void) {
             ESP_ERROR_CHECK(hid_host_uninstall_device(hid_device));
 
             hid_device_connected = false;
-            printf("Device disconnected Da!\n");
         }
 
-        fflush(stdout);
     } while (gpio_get_level(APP_QUIT_PIN) != 0);
+    
+*/
+    xEventGroupWaitBits(usb_flags, APP_QUIT_EVENT, pdTRUE, pdFALSE, portMAX_DELAY);
 
     if (hid_device_connected) {
         ESP_LOGI(TAG, "Uninitializing HID Device");
@@ -796,4 +857,5 @@ void app_main(void) {
     vTaskDelete(repeated_keys_task_handle);
     vEventGroupDelete(usb_flags);
     ESP_LOGI(TAG, "Done");
+    
 }
