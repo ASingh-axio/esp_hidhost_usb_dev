@@ -19,7 +19,6 @@
 
 #include "hid_host.h"
 #include "hid_usage_keyboard.h"
-#include "hid_usage_mouse.h"
 
 #define APP_QUIT_PIN                GPIO_NUM_0
 #define APP_QUIT_PIN_POLL_MS        500
@@ -80,7 +79,6 @@ static hid_host_device_handle_t hid_device = NULL;
 static bool hid_device_connected = false;
 
 hid_host_interface_handle_t keyboard_handle = NULL;
-hid_host_interface_handle_t mouse_handle = NULL;
 
 /**
  * @brief Scancode to ascii table
@@ -213,9 +211,11 @@ static void hid_print_new_device_report_header(hid_protocol_t proto)
     if (prev_proto_output != proto) {
         prev_proto_output = proto;
         printf("\r\n");
+        /*
         if (proto == HID_PROTOCOL_MOUSE) {
             printf("Mouse\r\n");
         }
+        */
         if (proto == HID_PROTOCOL_KEYBOARD) {
             printf("Keyboard\r\n");
         }
@@ -337,78 +337,6 @@ static inline bool key_found(const uint8_t *const src,
  * @param[in] data    Pointer to input report data buffer
  * @param[in] length  Length of input report data buffer
  */
-/*
-static void hid_host_keyboard_report_callback(const uint8_t *const data, const int length)
-{
-    hid_keyboard_input_report_boot_t *kb_report = (hid_keyboard_input_report_boot_t *)data;
-
-    if (length < sizeof(hid_keyboard_input_report_boot_t)) {
-        return;
-    }
-
-    static uint8_t prev_keys[HID_KEYBOARD_KEY_MAX] = { 0 };
-    key_event_t key_event;
-    num_keys = 0;
-
-     printf("New report received\n");
-     printf("kbreport.modifier.val: %d\n", kb_report->modifier.val);
-     printf("kbreport.reserved: %d\n", kb_report->reserved);
-     printf("keys:\n");
-     for(int i = 0; i<6; i++){
-        printf("Key %d : %u", i, kb_report->key[i] );
-     }
-
-
-    for (int i = 0; i < HID_KEYBOARD_KEY_MAX; i++) {
-        printf("Processing key slot %d\n", i);
-        printf("Key COUNTER val at start of slot: %d\n", key_counters[i]);
-
-        // Key has been released verification
-        if (prev_keys[i] > HID_KEY_ERROR_UNDEFINED &&
-                !key_found(kb_report->key, prev_keys[i], HID_KEYBOARD_KEY_MAX)) {
-            printf("In 1st if condition\n");
-            key_event.key_code = prev_keys[i];
-            key_event.modifier = 0;
-            key_event.state = KEY_STATE_RELEASED;
-            key_event_callback(&key_event);
-            key_counters[i] = 0;  // Reset counter when key is released
-            printf("Key released: %d\n", prev_keys[i]);
-        }
-
-        // Key is still pressed
-        if (key_found(kb_report->key, prev_keys[i], HID_KEYBOARD_KEY_MAX)) { 
-            printf("In 2nd if condition\n");
-            printf("key counter[%d] before ++ : %d\n",i,  key_counters[i]);
-            key_counters[i]++;
-            printf("Key %d still pressed, counter: %d\n", prev_keys[i], key_counters[i]);
-            if (key_counters[i] >= 5) {  // Adjust the counter threshold as needed
-                key_event.key_code = prev_keys[i];
-                key_event.modifier = 0;
-                key_event.state = KEY_STATE_PRESSED;
-                key_event_callback(&key_event);
-                key_counters[i] = 0;  // Reset counter after printing
-                printf("Repeated key press: %d\n", prev_keys[i]);
-            }
-        }
-
-        // Key has been pressed verification
-        if (kb_report->key[i] > HID_KEY_ERROR_UNDEFINED &&
-                !key_found(prev_keys, kb_report->key[i], HID_KEYBOARD_KEY_MAX)) {
-            printf("In 3rd if condition\n");
-            key_event.key_code = kb_report->key[i];
-            key_event.modifier = kb_report->modifier.val;
-            key_event.state = KEY_STATE_PRESSED;
-            key_event_callback(&key_event);
-            key_counters[i] = 1;  // Initialize counter for new key press
-            printf("\nNew key pressed: %d\n", kb_report->key[i]);
-        }
-    }
-
-    memcpy(prev_keys, &kb_report->key, HID_KEYBOARD_KEY_MAX);
-    printf("Updated previous keys\n");
-} */
-
-
 static void hid_host_keyboard_report_callback(const uint8_t *const data, const int length) {
     hid_keyboard_input_report_boot_t *kb_report = (hid_keyboard_input_report_boot_t *)data;
 
@@ -479,38 +407,6 @@ static void handle_repeated_keys(void *arg) {
     }
 }
 
-
-
-/**
- * @brief USB HID Host Mouse Interface report callback handler
- *
- * @param[in] data    Pointer to input report data buffer
- * @param[in] length  Length of input report data buffer
- */
-static void hid_host_mouse_report_callback(const uint8_t *const data, const int length)
-{
-    hid_mouse_input_report_boot_t *mouse_report = (hid_mouse_input_report_boot_t *)data;
-
-    if (length < sizeof(hid_mouse_input_report_boot_t)) {
-        return;
-    }
-
-    static int x_pos = 0;
-    static int y_pos = 0;
-
-    // Calculate absolute position from displacement
-    x_pos += mouse_report->x_displacement;
-    y_pos += mouse_report->y_displacement;
-
-    hid_print_new_device_report_header(HID_PROTOCOL_MOUSE);
-
-    printf("X: %06d\tY: %06d\t|%c|%c|\r",
-           x_pos, y_pos,
-           (mouse_report->buttons.button1 ? 'o' : ' '),
-           (mouse_report->buttons.button2 ? 'o' : ' '));
-    fflush(stdout);
-}
-
 /**
  * @brief USB HID Host event callback. Handle such event as device connection and removing
  *
@@ -550,15 +446,6 @@ static void hid_host_interface_event_callback(const hid_host_interface_event_t *
             };
 
             hid_host_claim_interface(&hid_keyboard_config, &keyboard_handle);
-        }
-
-        if (event->interface.proto == HID_PROTOCOL_MOUSE) {
-            const hid_host_interface_config_t hid_mouse_config = {
-                .proto = HID_PROTOCOL_MOUSE,
-                .callback = hid_host_mouse_report_callback,
-            };
-
-            hid_host_claim_interface(&hid_mouse_config, &mouse_handle);
         }
 
         break;
@@ -613,98 +500,6 @@ static bool wait_for_event(EventBits_t event, TickType_t timeout)
 }
 
 
-/*
-void app_main(void)
-{
-    TaskHandle_t usb_events_task_handle;
-    hid_host_device_handle_t hid_device;
-
-    BaseType_t task_created;
-
-    const gpio_config_t input_pin = {
-        .pin_bit_mask = BIT64(APP_QUIT_PIN),
-        .mode = GPIO_MODE_INPUT,
-        .pull_up_en = GPIO_PULLUP_ENABLE,
-    };
-    ESP_ERROR_CHECK( gpio_config(&input_pin) );
-
-    ESP_LOGI(TAG, "HID HOST example");
-
-    usb_flags = xEventGroupCreate();
-    assert(usb_flags);
-
-    const usb_host_config_t host_config = {
-        .skip_phy_setup = false,
-        .intr_flags = ESP_INTR_FLAG_LEVEL1
-    };
-
-    ESP_ERROR_CHECK( usb_host_install(&host_config) );
-    task_created = xTaskCreate(handle_usb_events, "usb_events", 4096, NULL, 2, &usb_events_task_handle);
-    assert(task_created);
-
-    // hid host driver config
-    const hid_host_driver_config_t hid_host_config = {
-        .create_background_task = true,
-        .task_priority = 5,
-        .stack_size = 4096,
-        .core_id = 0,
-        .callback = hid_host_event_callback,
-        .callback_arg = NULL
-    };
-
-    ESP_ERROR_CHECK( hid_host_install(&hid_host_config) );
-
-    do {
-        EventBits_t event = xEventGroupWaitBits(usb_flags, USB_EVENTS_TO_WAIT, pdTRUE, pdFALSE, pdMS_TO_TICKS(APP_QUIT_PIN_POLL_MS));
-
-        if (event & DEVICE_CONNECTED) {
-            xEventGroupClearBits(usb_flags, DEVICE_CONNECTED);
-            hid_device_connected = true;
-        }
-
-        if (event & DEVICE_ADDRESS_MASK) {
-            xEventGroupClearBits(usb_flags, DEVICE_ADDRESS_MASK);
-
-            const hid_host_device_config_t hid_host_device_config = {
-                .dev_addr = (event & DEVICE_ADDRESS_MASK) >> 4,
-                        .iface_event_cb = hid_host_interface_event_callback,
-                        .iface_event_arg = NULL,
-            };
-
-            ESP_ERROR_CHECK( hid_host_install_device(&hid_host_device_config, &hid_device) );
-        }
-
-        if (event & DEVICE_DISCONNECTED) {
-            xEventGroupClearBits(usb_flags, DEVICE_DISCONNECTED);
-
-            hid_host_release_interface(keyboard_handle);
-            hid_host_release_interface(mouse_handle);
-
-            ESP_ERROR_CHECK( hid_host_uninstall_device(hid_device) );
-
-            hid_device_connected = false;
-        }
-
-    } while (gpio_get_level(APP_QUIT_PIN) != 0);
-
-    if (hid_device_connected) {
-        ESP_LOGI(TAG, "Uninitializing HID Device");
-        hid_host_release_interface(keyboard_handle);
-        hid_host_release_interface(mouse_handle);
-        ESP_ERROR_CHECK( hid_host_uninstall_device(hid_device) );
-        hid_device_connected = false;
-    }
-
-    ESP_LOGI(TAG, "Uninitializing USB");
-    ESP_ERROR_CHECK( hid_host_uninstall() );
-    wait_for_event(READY_TO_UNINSTALL, portMAX_DELAY);
-    ESP_ERROR_CHECK( usb_host_uninstall() );
-    vTaskDelete(usb_events_task_handle);
-    vEventGroupDelete(usb_flags);
-    ESP_LOGI(TAG, "Done");
-}
-*/
-
 
 void vUSBEventHandlerTask(void *pvParameters) {
     while (gpio_get_level(APP_QUIT_PIN) != 0) {
@@ -737,7 +532,6 @@ void vUSBEventHandlerTask(void *pvParameters) {
             xEventGroupClearBits(usb_flags, DEVICE_DISCONNECTED);
 
             hid_host_release_interface(keyboard_handle);
-            hid_host_release_interface(mouse_handle);
 
             ESP_ERROR_CHECK(hid_host_uninstall_device(hid_device));
 
@@ -755,7 +549,6 @@ void vUSBEventHandlerTask(void *pvParameters) {
 void app_main(void) {
     TaskHandle_t usb_events_task_handle;
     TaskHandle_t repeated_keys_task_handle;
-    //hid_host_device_handle_t hid_device;
 
     BaseType_t task_created;
 
@@ -804,47 +597,13 @@ void app_main(void) {
         NULL
     );
     assert(task_created == pdPASS);
-/*
-    do {
-        EventBits_t event = xEventGroupWaitBits(usb_flags, USB_EVENTS_TO_WAIT, pdTRUE, pdFALSE, pdMS_TO_TICKS(APP_QUIT_PIN_POLL_MS));
 
-        if (event & DEVICE_CONNECTED) {
-            xEventGroupClearBits(usb_flags, DEVICE_CONNECTED);
-            hid_device_connected = true;
-        }
-
-        if (event & DEVICE_ADDRESS_MASK) {
-            xEventGroupClearBits(usb_flags, DEVICE_ADDRESS_MASK);
-
-            const hid_host_device_config_t hid_host_device_config = {
-                .dev_addr = (event & DEVICE_ADDRESS_MASK) >> 4,
-                .iface_event_cb = hid_host_interface_event_callback,
-                .iface_event_arg = NULL,
-            };
-
-            ESP_ERROR_CHECK(hid_host_install_device(&hid_host_device_config, &hid_device));
-        }
-
-        if (event & DEVICE_DISCONNECTED) {
-            xEventGroupClearBits(usb_flags, DEVICE_DISCONNECTED);
-
-            hid_host_release_interface(keyboard_handle);
-            hid_host_release_interface(mouse_handle);
-
-            ESP_ERROR_CHECK(hid_host_uninstall_device(hid_device));
-
-            hid_device_connected = false;
-        }
-
-    } while (gpio_get_level(APP_QUIT_PIN) != 0);
-    
-*/
     xEventGroupWaitBits(usb_flags, APP_QUIT_EVENT, pdTRUE, pdFALSE, portMAX_DELAY);
 
     if (hid_device_connected) {
         ESP_LOGI(TAG, "Uninitializing HID Device");
         hid_host_release_interface(keyboard_handle);
-        hid_host_release_interface(mouse_handle);
+       // hid_host_release_interface(mouse_handle);
         ESP_ERROR_CHECK(hid_host_uninstall_device(hid_device));
         hid_device_connected = false;
     }
